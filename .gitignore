@@ -1,0 +1,17 @@
+# Python environment & cache
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Datasets and local models
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+
+# MLOps artifacts
+mlruns/
+.DS_Store
