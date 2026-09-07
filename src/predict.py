@@ -2,40 +2,66 @@ import os
 import joblib
 import pandas as pd
 from typing import Dict, Any
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
+# Initialize FastAPI app
+app = FastAPI(
+    title="E-Commerce Demand Forecasting API",
+    description="Asynchronous MLOps microservice for dynamic demand forecasting.",
+    version="1.0.0"
+)
 
 MODEL_PATH = os.path.join("models", "demand_model.pkl")
 
+# Pydantic schema for incoming API request payloads
+class DemandPredictionInput(BaseModel):
+    avg_price: float = Field(..., gt=0, description="Average product price in USD")
+    day_of_week: int = Field(..., ge=0, le=6, description="Day of week (0=Monday, 6=Sunday)")
+    month: int = Field(..., ge=1, le=12, description="Month of year (1-12)")
+    day: int = Field(..., ge=1, le=31, description="Day of month (1-31)")
+    lag_1: float = Field(..., ge=0, description="Demand from 1 day prior")
+    lag_7: float = Field(..., ge=0, description="Demand from 7 days prior")
+    rolling_mean_7: float = Field(..., ge=0, description="7-day rolling average demand")
+
+# Pydantic schema for outgoing API response
+class DemandPredictionOutput(BaseModel):
+    predicted_units_sold: float
+    status: str
+
 
 def load_model():
-    """Loads saved model artifact."""
+    """Loads saved model artifact from disk."""
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError("Model file not found. Run 'python -m src.train' first.")
     return joblib.load(MODEL_PATH)
 
 
-def predict_demand(input_features: Dict[str, Any]) -> float:
-    """Runs inference on a single dictionary input matching training schema."""
-    model = load_model()
-    
-    # Required feature list order
-    feature_order = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
-    df = pd.DataFrame([input_features])[feature_order]
-
-    prediction = model.predict(df)[0]
-    return float(np.round(prediction, 2)) if 'np' in globals() else float(round(prediction, 2))
+@app.get("/health")
+def health_check() -> Dict[str, str]:
+    """Health check endpoint for container orchestrators."""
+    if os.path.exists(MODEL_PATH):
+        return {"status": "healthy", "model_loaded": "true"}
+    return {"status": "degraded", "model_loaded": "false"}
 
 
-if __name__ == "__main__":
-    # Test sample input
-    sample_data = {
-        "avg_price": 120.50,
-        "day_of_week": 2,
-        "month": 10,
-        "day": 15,
-        "lag_1": 150.0,
-        "lag_7": 140.0,
-        "rolling_mean_7": 145.2
-    }
-    predicted_value = predict_demand(sample_data)
-    print(f"Predicted Daily Demand: {predicted_value} units")
+@app.post("/predict", response_model=DemandPredictionOutput)
+def predict(payload: DemandPredictionInput) -> DemandPredictionOutput:
+    """Predicts daily product demand based on feature telemetry payload."""
+    try:
+        model = load_model()
+        
+        # Format payload into DataFrame matching XGBoost feature order
+        feature_order = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
+        input_data = pd.DataFrame([payload.model_dump()])[feature_order]
+
+        # Execute prediction
+        prediction = float(model.predict(input_data)[0])
+        prediction_rounded = max(0.0, round(prediction, 2))
+
+        return DemandPredictionOutput(
+            predicted_units_sold=prediction_rounded,
+            status="success"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
