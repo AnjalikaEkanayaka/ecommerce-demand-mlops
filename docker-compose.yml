@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # FastAPI Microservice Container
+  api:
+    build: .
+    container_name: demand_forecasting_api
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    restart: always
+
+  # MLflow Dashboard Container
+  mlflow:
+    image: python:3.12-slim
+    container_name: mlflow_server
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: >
+      bash -c "pip install mlflow && mlflow ui --host 0.0.0.0 --port 5000"
+    ports:
+      - "5000:5000"
+    restart: always
