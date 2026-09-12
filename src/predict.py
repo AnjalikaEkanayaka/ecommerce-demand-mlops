@@ -1,73 +1,61 @@
 import os
-import joblib
-import pandas as pd
-from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
+import joblib
+
 from src.drift_monitor import run_monitoring_pipeline, REPORT_DIR
 from src.retrain import execute_retraining_pipeline
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="E-Commerce Demand Forecasting API",
-    description="Asynchronous MLOps microservice for dynamic demand forecasting.",
-    version="1.0.0"
-)
+app = FastAPI(title="E-Commerce Demand Forecasting API")
 
 MODEL_PATH = os.path.join("models", "demand_model.pkl")
 
-# Pydantic schema for incoming API request payloads
-class DemandPredictionInput(BaseModel):
-    avg_price: float = Field(..., gt=0, description="Average product price in USD")
-    day_of_week: int = Field(..., ge=0, le=6, description="Day of week (0=Monday, 6=Sunday)")
-    month: int = Field(..., ge=1, le=12, description="Month of year (1-12)")
-    day: int = Field(..., ge=1, le=31, description="Day of month (1-31)")
-    lag_1: float = Field(..., ge=0, description="Demand from 1 day prior")
-    lag_7: float = Field(..., ge=0, description="Demand from 7 days prior")
-    rolling_mean_7: float = Field(..., ge=0, description="7-day rolling average demand")
-
-# Pydantic schema for outgoing API response
-class DemandPredictionOutput(BaseModel):
-    predicted_units_sold: float
-    status: str
-
 
 def load_model():
-    """Loads saved model artifact from disk."""
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError("Model file not found. Run 'python -m src.train' first.")
-    return joblib.load(MODEL_PATH)
+    if os.path.exists(MODEL_PATH):
+        return joblib.load(MODEL_PATH)
+    return None
+
+
+class DemandPayload(BaseModel):
+    avg_price: float = Field(..., gt=0, description="Average price must be greater than 0")
+    day_of_week: int = Field(..., ge=0, le=6)
+    month: int = Field(..., ge=1, le=12)
+    day: int = Field(..., ge=1, le=31)
+    lag_1: float = Field(..., ge=0)
+    lag_7: float = Field(..., ge=0)
+    rolling_mean_7: float = Field(..., ge=0)
 
 
 @app.get("/health")
-def health_check() -> Dict[str, str]:
-    """Health check endpoint for container orchestrators."""
-    if os.path.exists(MODEL_PATH):
-        return {"status": "healthy", "model_loaded": "true"}
-    return {"status": "degraded", "model_loaded": "false"}
+def health_check():
+    model = load_model()
+    return {"status": "healthy", "model_loaded": model is not None}
 
 
-@app.post("/predict", response_model=DemandPredictionOutput)
-def predict(payload: DemandPredictionInput) -> DemandPredictionOutput:
-    """Predicts daily product demand based on feature telemetry payload."""
-    try:
-        model = load_model()
-        
-        # Format payload into DataFrame matching XGBoost feature order
-        feature_order = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
-        input_data = pd.DataFrame([payload.model_dump()])[feature_order]
+@app.post("/predict")
+def predict_demand(payload: DemandPayload):
+    model = load_model()
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model artifact not found.")
 
-        # Execute prediction
-        prediction = float(model.predict(input_data)[0])
-        prediction_rounded = max(0.0, round(prediction, 2))
+    features = [[
+        payload.avg_price,
+        payload.day_of_week,
+        payload.month,
+        payload.day,
+        payload.lag_1,
+        payload.lag_7,
+        payload.rolling_mean_7
+    ]]
 
-        return DemandPredictionOutput(
-            predicted_units_sold=prediction_rounded,
-            status="success"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    prediction = model.predict(features)[0]
+    return {
+        "status": "success",
+        "predicted_units_sold": float(prediction)
+    }
+
 
 @app.get("/drift-report", response_class=HTMLResponse)
 def get_drift_report():
@@ -78,7 +66,7 @@ def get_drift_report():
         if os.path.exists(report_file):
             with open(report_file, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read(), status_code=200)
-        raise HTTPException(status_code=500, detail="Report generation failed.")
+        raise HTTPException(status_code=500, detail="Drift report file creation failed.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
