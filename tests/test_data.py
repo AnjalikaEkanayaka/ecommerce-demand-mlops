@@ -106,3 +106,10 @@ def test_drift_report_generation():
     response = client.get("/drift-report")
     assert response.status_code == 200
     assert "<html>" in response.text.lower() or "<!doctype html>" in response.text.lower()
+
+
+def test_retrain_endpoint():
+    """Verify trigger endpoint initiates retraining pipeline."""
+    response = client.post("/retrain?force=true")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"

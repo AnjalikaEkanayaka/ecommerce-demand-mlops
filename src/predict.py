@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse
 from src.drift_monitor import run_monitoring_pipeline, REPORT_DIR
+from src.retrain import execute_retraining_pipeline
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -78,5 +79,17 @@ def get_drift_report():
             with open(report_file, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read(), status_code=200)
         raise HTTPException(status_code=500, detail="Report generation failed.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/retrain")
+def trigger_retrain(force: bool = False):
+    """Triggers automated model retraining pipeline."""
+    try:
+        success = execute_retraining_pipeline(drift_threshold_exceeded=force)
+        if success:
+            return {"status": "success", "message": "Model retrained and updated successfully."}
+        return {"status": "skipped", "message": "Retraining skipped. No drift threshold exceeded."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
