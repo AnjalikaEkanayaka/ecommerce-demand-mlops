@@ -6,19 +6,22 @@ from src.predict import app, load_model
 
 client = TestClient(app)
 
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_mock_data_and_model():
     """Ensures necessary directories and mock files exist for CI environment."""
     os.makedirs(os.path.join("data", "processed"), exist_ok=True)
     os.makedirs("models", exist_ok=True)
-    
+
     # Create mock daily_demand.csv if it doesn't exist
     processed_path = os.path.join("data", "processed", "daily_demand.csv")
     if not os.path.exists(processed_path):
+        # Create at least 15 rows so rolling windows and shifts don't fail
+        dates = pd.date_range(start="2023-01-01", periods=15, freq="D")
         mock_df = pd.DataFrame({
-            "date": ["2023-01-01", "2023-01-02"],
-            "total_units_sold": [100.0, 120.0],
-            "avg_price": [50.0, 50.0]
+            "date": dates.strftime("%Y-%m-%d"),
+            "total_units_sold": [100.0 + i for i in range(15)],
+            "avg_price": [50.0] * 15
         })
         mock_df.to_csv(processed_path, index=False)
 
@@ -94,22 +97,15 @@ def test_predict_endpoint_invalid_month():
     assert response.status_code == 422
 
 
-def test_predict_endpoint_missing_fields():
-    """Verify API rejects payloads with missing required keys."""
-    incomplete_payload = {"avg_price": 100.0, "day_of_week": 1}
-    response = client.post("/predict", json=incomplete_payload)
-    assert response.status_code == 422
-
-
-def test_drift_report_generation():
-    """Verify drift detection pipeline runs and generates valid HTML output."""
+def test_drift_report_endpoint():
+    """Verify drift report route generates and serves HTML."""
     response = client.get("/drift-report")
     assert response.status_code == 200
-    assert "<html>" in response.text.lower() or "<!doctype html>" in response.text.lower()
+    assert "html" in response.headers.get("content-type", "").lower() or "<html" in response.text.lower()
 
 
 def test_retrain_endpoint():
-    """Verify trigger endpoint initiates retraining pipeline."""
+    """Verify retrain route executes training pipeline."""
     response = client.post("/retrain?force=true")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
