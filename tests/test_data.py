@@ -99,3 +99,10 @@ def test_predict_endpoint_missing_fields():
     incomplete_payload = {"avg_price": 100.0, "day_of_week": 1}
     response = client.post("/predict", json=incomplete_payload)
     assert response.status_code == 422
+
+
+def test_drift_report_generation():
+    """Verify drift detection pipeline runs and generates valid HTML output."""
+    response = client.get("/drift-report")
+    assert response.status_code == 200
+    assert "<html>" in response.text.lower() or "<!doctype html>" in response.text.lower()

@@ -4,6 +4,8 @@ import pandas as pd
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from fastapi.responses import HTMLResponse
+from src.drift_monitor import run_monitoring_pipeline, REPORT_DIR
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -63,5 +65,18 @@ def predict(payload: DemandPredictionInput) -> DemandPredictionOutput:
             predicted_units_sold=prediction_rounded,
             status="success"
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/drift-report", response_class=HTMLResponse)
+def get_drift_report():
+    """Triggers drift monitoring check and serves the interactive HTML report."""
+    try:
+        run_monitoring_pipeline()
+        report_file = os.path.join(REPORT_DIR, "drift_report.html")
+        if os.path.exists(report_file):
+            with open(report_file, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read(), status_code=200)
+        raise HTTPException(status_code=500, detail="Report generation failed.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
