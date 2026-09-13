@@ -32,14 +32,34 @@ def daily_data(settings):
 
 @pytest.fixture
 def model_artifact(settings):
-    import joblib
     from xgboost import XGBRegressor
 
-    model = XGBRegressor(n_estimators=2, max_depth=1, n_jobs=1, random_state=42)
-    model.fit(
+    from src.model_store import ModelStore
+
+    features = pd.DataFrame(
         np.ones((10, len(FEATURE_COLUMNS))),
-        np.full(10, 100.0),
+        columns=FEATURE_COLUMNS,
     )
-    settings.model_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, settings.model_path)
+
+    model = XGBRegressor(
+        n_estimators=2,
+        max_depth=1,
+        n_jobs=1,
+        random_state=42,
+    )
+    model.fit(features, np.full(10, 100.0))
+
+    store = ModelStore(settings.runtime_dir / "models")
+    version = store.save_candidate(
+        model,
+        training_end="2022-12-31",
+        evaluation_end="2023-01-14",
+    )
+
+    # Install a known model only in this test's temporary directory.
+    store.promote_candidate(
+        version,
+        expected_current_version=None,
+    )
+
     return model

@@ -41,15 +41,35 @@ def test_drift_endpoint(daily_data, settings):
         assert "html" in response.headers["content-type"]
         assert (settings.report_dir / "drift_report.html").is_file()
 
-
-def test_retrain_endpoint_uses_isolated_storage(daily_data, settings):
+def test_retrain_without_trigger_is_skipped(settings):
     with TestClient(app) as client:
-        assert client.post("/retrain").json()["status"] == "skipped"
-        assert not settings.model_path.exists()
+        response = client.post("/retrain")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "skipped"
+    assert not (
+        settings.runtime_dir / "models" / "production.json"
+    ).exists()
+
+
+def test_retrain_endpoint_preserves_rejection(monkeypatch):
+    def reject_candidate(drift_threshold_exceeded=False):
+        assert drift_threshold_exceeded is True
+        return {
+            "status": "rejected",
+            "reason": "Candidate did not improve forecasting error.",
+        }
+
+    monkeypatch.setattr(
+        "src.predict.execute_retraining_pipeline",
+        reject_candidate,
+    )
+
+    with TestClient(app) as client:
         response = client.post("/retrain?force=true")
-        assert response.status_code == 200
-        assert response.json()["status"] == "success"
-        assert load_model().n_features_in_ == len(FEATURE_COLUMNS)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
 
 def test_same_day_price_is_rejected(model_artifact):
     with TestClient(app) as client:
