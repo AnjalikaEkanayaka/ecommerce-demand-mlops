@@ -1,7 +1,8 @@
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from src.features import FEATURE_COLUMNS
 import joblib
 
 from src.drift_monitor import run_monitoring_pipeline
@@ -12,13 +13,26 @@ app = FastAPI(title="E-Commerce Demand Forecasting API")
 
 def load_model():
     model_path = Settings.from_env().model_path
-    if model_path.exists():
-        return joblib.load(model_path)
-    return None
+
+    if not model_path.exists():
+        return None
+
+    model = joblib.load(model_path)
+
+    # Old models included avg_price and have seven input features.
+    # They must not be served with the new six-feature request format.
+    if getattr(model, "n_features_in_", None) != len(FEATURE_COLUMNS):
+        return None
+
+    return model
 
 
 class DemandPayload(BaseModel):
-    avg_price: float = Field(..., gt=0, description="Average price must be greater than 0")
+    model_config = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+    )
+
     day_of_week: int = Field(..., ge=0, le=6)
     month: int = Field(..., ge=1, le=12)
     day: int = Field(..., ge=1, le=31)
@@ -37,16 +51,14 @@ def health_check():
 def predict_demand(payload: DemandPayload):
     model = load_model()
     if model is None:
-        raise HTTPException(status_code=500, detail="Model artifact not found.")
+        raise HTTPException(
+            status_code=503,
+            detail="A compatible trained model is not available.",
+        )
 
     features = [[
-        payload.avg_price,
-        payload.day_of_week,
-        payload.month,
-        payload.day,
-        payload.lag_1,
-        payload.lag_7,
-        payload.rolling_mean_7
+        getattr(payload, column)
+        for column in FEATURE_COLUMNS
     ]]
 
     prediction = model.predict(features)[0]

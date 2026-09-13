@@ -1,10 +1,17 @@
 import numpy as np
 from fastapi.testclient import TestClient
 from src.predict import app, load_model
+from src.features import FEATURE_COLUMNS
 
 
-PAYLOAD = dict(avg_price=40.0, day_of_week=1, month=5, day=10,
-               lag_1=100.0, lag_7=100.0, rolling_mean_7=100.0)
+PAYLOAD = {
+    "day_of_week": 1,
+    "month": 5,
+    "day": 10,
+    "lag_1": 100.0,
+    "lag_7": 100.0,
+    "rolling_mean_7": 100.0,
+}
 
 
 def test_missing_model(settings):
@@ -42,4 +49,20 @@ def test_retrain_endpoint_uses_isolated_storage(daily_data, settings):
         response = client.post("/retrain?force=true")
         assert response.status_code == 200
         assert response.json()["status"] == "success"
-        assert load_model().n_features_in_ == 7
+        assert load_model().n_features_in_ == len(FEATURE_COLUMNS)
+
+def test_same_day_price_is_rejected(model_artifact):
+    with TestClient(app) as client:
+        response = client.post(
+            "/predict",
+            json={**PAYLOAD, "avg_price": 40.0},
+        )
+
+    assert response.status_code == 422
+
+
+def test_prediction_without_model_returns_unavailable(settings):
+    with TestClient(app) as client:
+        response = client.post("/predict", json=PAYLOAD)
+
+    assert response.status_code == 503

@@ -1,70 +1,214 @@
-import os
+"""Validate Olist input and prepare daily recorded order-item demand."""
+
+import argparse
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
-from typing import Tuple
-from src.utils import RawOrderItemSchema, ProcessedDemandSchema
+
 from src.config import Settings
+from src.features import TARGET_COLUMN
 
 
-RAW_DATA_DIR = os.path.join("data", "raw")
+ORDER_COLUMNS = ["order_id", "order_purchase_timestamp"]
+ITEM_COLUMNS = ["order_id", "order_item_id"]
 
 
-def load_raw_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Loads raw Olist orders and order items CSV files."""
-    orders_path = os.path.join(RAW_DATA_DIR, "olist_orders_dataset.csv")
-    items_path = os.path.join(RAW_DATA_DIR, "olist_order_items_dataset.csv")
+def require_columns(df, required, label):
+    if not df.columns.is_unique:
+        raise ValueError(f"{label}: column names must be unique.")
 
-    if not os.path.exists(orders_path) or not os.path.exists(items_path):
-        raise FileNotFoundError("Raw dataset CSVs not found in data/raw/")
+    missing = set(required).difference(df.columns)
+    if missing:
+        raise ValueError(f"{label}: missing columns {sorted(missing)}")
 
-    orders = pd.read_csv(orders_path)
-    items = pd.read_csv(items_path)
+    if df.empty:
+        raise ValueError(f"{label}: dataset is empty.")
+
+
+def parse_day(value):
+    day = pd.Timestamp(value)
+
+    if pd.isna(day) or day.tzinfo is not None:
+        raise ValueError("Use a valid timezone-naive calendar date.")
+
+    if day != day.normalize():
+        raise ValueError("Date boundaries must not contain a time of day.")
+
+    return day
+
+
+def load_raw_data(raw_dir="data/raw"):
+    """Read only the columns needed for counting recorded order items."""
+    raw_dir = Path(raw_dir)
+
+    orders = pd.read_csv(
+        raw_dir / "olist_orders_dataset.csv",
+        usecols=ORDER_COLUMNS,
+        dtype={"order_id": "string"},
+    )
+
+    items = pd.read_csv(
+        raw_dir / "olist_order_items_dataset.csv",
+        usecols=ITEM_COLUMNS,
+        dtype={"order_id": "string"},
+    )
+
     return orders, items
 
 
-def validate_and_process_demand() -> pd.DataFrame:
-    """Cleans, validates, and aggregates daily demand metrics."""
-    orders, items = load_raw_data()
+def aggregate_daily_demand(
+    orders,
+    items,
+    *,
+    start_date,
+    end_date,
+    fill_missing_days=False,
+):
+    """Return daily counts without writing files or modifying the inputs.
 
-    # Filter delivered orders
-    delivered_orders = orders[orders["order_status"] == "delivered"].copy()
+    Set fill_missing_days=True only when the input is known to be complete
+    for the selected reporting period.
+    """
+    require_columns(orders, ORDER_COLUMNS, "Orders")
+    require_columns(items, ITEM_COLUMNS, "Items")
 
-    # Merge with items
-    df = pd.merge(items, delivered_orders, on="order_id", how="inner")
+    start = parse_day(start_date)
+    end = parse_day(end_date)
 
-    # Extract date
-    df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
-    df["date"] = df["order_purchase_timestamp"].dt.strftime("%Y-%m-%d")
+    if start > end:
+        raise ValueError("start_date must be on or before end_date.")
 
-    # Aggregate daily metric summary
-    daily_demand = (
-        df.groupby(["date"])
-        .agg(
-            total_units_sold=("order_item_id", "count"),
-            avg_price=("price", "mean"),
-            total_revenue=("price", "sum"),
+    orders = orders[ORDER_COLUMNS].copy()
+    items = items[ITEM_COLUMNS].copy()
+
+    for label, frame in [("Orders", orders), ("Items", items)]:
+        ids = frame["order_id"].astype("string").str.strip()
+
+        if ids.isna().any() or ids.eq("").any():
+            raise ValueError(f"{label}: order_id cannot be missing or blank.")
+
+        frame["order_id"] = ids
+
+    if orders["order_id"].duplicated().any():
+        raise ValueError("Orders: duplicate order_id values.")
+
+    timestamps = pd.to_datetime(
+        orders["order_purchase_timestamp"],
+        format="ISO8601",
+        errors="raise",
+    )
+
+    if timestamps.isna().any():
+        raise ValueError("Purchase timestamps cannot be missing.")
+
+    if timestamps.dt.tz is not None:
+        raise ValueError("Purchase timestamps must use one local, naive timezone.")
+
+    orders["date"] = timestamps.dt.normalize()
+
+    if start < orders["date"].min() or end > orders["date"].max():
+        raise ValueError(
+            "Requested window is outside the observed order-date range."
         )
+
+    if pd.api.types.is_bool_dtype(items["order_item_id"]):
+        raise ValueError("order_item_id must contain positive whole numbers.")
+
+    item_numbers = pd.to_numeric(items["order_item_id"], errors="raise")
+    values = item_numbers.to_numpy(dtype=float)
+
+    if (
+        not np.isfinite(values).all()
+        or (values <= 0).any()
+        or (values != np.floor(values)).any()
+    ):
+        raise ValueError("order_item_id must contain positive whole numbers.")
+
+    items["order_item_id"] = item_numbers
+
+    if items.duplicated(["order_id", "order_item_id"]).any():
+        raise ValueError("Items: duplicate order/item keys.")
+
+    if not items["order_id"].isin(orders["order_id"]).all():
+        raise ValueError("Some items reference an unknown order_id.")
+
+    selected_orders = orders.loc[
+        orders["date"].between(start, end),
+        ["order_id", "date"],
+    ]
+
+    joined = items.merge(
+        selected_orders,
+        on="order_id",
+        how="inner",
+        validate="many_to_one",
+    )
+
+    counts = joined.groupby("date").size()
+    calendar = pd.date_range(start, end, freq="D")
+    daily = counts.reindex(calendar)
+
+    if daily.isna().any() and not fill_missing_days:
+        raise ValueError(
+            "Missing calendar dates. Confirm input completeness before "
+            "using fill_missing_days=True."
+        )
+
+    return (
+        daily.fillna(0)
+        .astype("int64")
+        .rename(TARGET_COLUMN)
+        .rename_axis("date")
         .reset_index()
     )
 
-    # Assign category placeholder for unified time-series aggregation
-    daily_demand["product_category"] = "all_products"
 
-    # Validate schema row by row
-    validated_records = []
-    for record in daily_demand.to_dict(orient="records"):
-        validated_record = ProcessedDemandSchema(**record)
-        validated_records.append(validated_record.model_dump())
+def validate_and_process_demand(
+    *,
+    start_date,
+    end_date,
+    raw_dir="data/raw",
+    fill_missing_days=False,
+    settings=None,
+):
+    """Load explicitly selected input and save validated daily demand."""
+    orders, items = load_raw_data(raw_dir)
 
-    processed_df = pd.DataFrame(validated_records)
+    daily = aggregate_daily_demand(
+        orders,
+        items,
+        start_date=start_date,
+        end_date=end_date,
+        fill_missing_days=fill_missing_days,
+    )
 
-    # Save output dataset
-    output_path = Settings.from_env().processed_data_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    processed_df.to_csv(output_path, index=False)
-    print(f"Data successfully processed and saved to {output_path}")
+    settings = settings or Settings.from_env()
+    output = settings.processed_data_path
+    output.parent.mkdir(parents=True, exist_ok=True)
+    daily.to_csv(output, index=False)
 
-    return processed_df
+    print(f"Saved {len(daily)} daily observations to {output}")
+    return daily
 
 
 if __name__ == "__main__":
-    validate_and_process_demand()
+    parser = argparse.ArgumentParser(
+        description="Prepare daily recorded order-item demand."
+    )
+    parser.add_argument("--raw-dir", default="data/raw")
+    parser.add_argument("--start-date", required=True)
+    parser.add_argument("--end-date", required=True)
+    parser.add_argument(
+        "--fill-missing-days",
+        action="store_true",
+        help="Treat absent days as zero only for a confirmed complete extract.",
+    )
+    args = parser.parse_args()
+
+    validate_and_process_demand(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        raw_dir=args.raw_dir,
+        fill_missing_days=args.fill_missing_days,
+    )

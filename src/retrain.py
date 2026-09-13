@@ -4,30 +4,14 @@ import pandas as pd
 import mlflow
 import mlflow.xgboost
 from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from src.config import Settings, configure_tracking
-
-def create_time_series_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Generates time-series lag and rolling window features."""
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-
-    # Date component features
-    df["day_of_week"] = df["date"].dt.dayofweek
-    df["month"] = df["date"].dt.month
-    df["day"] = df["date"].dt.day
-
-    # Lag and rolling features
-    df["lag_1"] = df["total_units_sold"].shift(1)
-    df["lag_7"] = df["total_units_sold"].shift(7)
-    df["rolling_mean_7"] = df["total_units_sold"].shift(1).rolling(window=7).mean()
-
-    # Drop initial NaN rows caused by shifting
-    df = df.dropna().reset_index(drop=True)
-    return df
-
+from src.features import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMN,
+    create_time_features,
+    chronological_split,
+)
 
 def execute_retraining_pipeline(drift_threshold_exceeded: bool = True, settings: Settings | None = None) -> bool:
     """
@@ -46,15 +30,18 @@ def execute_retraining_pipeline(drift_threshold_exceeded: bool = True, settings:
 
     # Load data and build features
     raw_df = pd.read_csv(settings.processed_data_path)
-    df = create_time_series_features(raw_df)
+    df = create_time_features(raw_df)
 
-    features = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
-    target = "total_units_sold"
+    train_df, validation_df = chronological_split(
+        df,
+        validation_days=14,
+    )
 
-    X = df[features]
-    y = df[target]
+    X_train = train_df[FEATURE_COLUMNS]
+    y_train = train_df[TARGET_COLUMN]
 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
+    X_val = validation_df[FEATURE_COLUMNS]
+    y_val = validation_df[TARGET_COLUMN]
 
     # MLflow tracking
     configure_tracking(settings)

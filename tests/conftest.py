@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from src.config import Settings
+from src.features import FEATURE_COLUMNS
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +36,10 @@ def model_artifact(settings):
     from xgboost import XGBRegressor
 
     model = XGBRegressor(n_estimators=2, max_depth=1, n_jobs=1, random_state=42)
-    model.fit(np.ones((10, 7)), np.full(10, 100.0))
+    model.fit(
+        np.ones((10, len(FEATURE_COLUMNS))),
+        np.full(10, 100.0),
+    )
     settings.model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, settings.model_path)
     return model
