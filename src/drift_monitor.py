@@ -43,12 +43,13 @@ def run_monitoring_pipeline() -> None:
 
     reference_df = pd.read_csv(processed_path)
 
-    # Simulate production telemetry drift (increase prices by 30% and units sold)
     current_df = reference_df.copy()
-    current_df["avg_price"] = current_df["avg_price"] * 1.30
-    current_df["total_units_sold"] = current_df["total_units_sold"] * 1.50
+    # Synthetic change in recorded demand, not actual production telemetry.
+    current_df["total_units_sold"] = (
+        current_df["total_units_sold"] * 1.50
+    ).round().astype(int)
 
-    features = ["avg_price", "total_units_sold"]
+    features = ["total_units_sold"]
     report_path, has_drifted = generate_drift_report(
         reference_df[features], 
         current_df[features]

@@ -6,25 +6,12 @@ import pandas as pd
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from src.config import Settings, configure_tracking
-
-
-def create_time_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Generates lag features and calendar indicators for time-series forecasting."""
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-
-    df["day_of_week"] = df["date"].dt.dayofweek
-    df["month"] = df["date"].dt.month
-    df["day"] = df["date"].dt.day
-
-    df["lag_1"] = df["total_units_sold"].shift(1)
-    df["lag_7"] = df["total_units_sold"].shift(7)
-    df["rolling_mean_7"] = df["total_units_sold"].shift(1).rolling(window=7).mean()
-
-    df = df.dropna().reset_index(drop=True)
-    return df
-
+from src.features import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMN,
+    create_time_features,
+    chronological_split,
+)
 
 def train_model(settings: Settings | None = None) -> None:
     """Trains an XGBoost regressor with MLflow tracking and registration."""
@@ -35,15 +22,16 @@ def train_model(settings: Settings | None = None) -> None:
     df = pd.read_csv(settings.processed_data_path)
     featured_df = create_time_features(df)
 
-    features = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
-    target = "total_units_sold"
+    train_df, validation_df = chronological_split(
+        featured_df,
+        validation_days=14,
+    )
 
-    X = featured_df[features]
-    y = featured_df[target]
+    X_train = train_df[FEATURE_COLUMNS]
+    y_train = train_df[TARGET_COLUMN]
 
-    split_idx = int(len(featured_df) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+    X_test = validation_df[FEATURE_COLUMNS]
+    y_test = validation_df[TARGET_COLUMN]
 
     # Set MLflow Experiment
     configure_tracking(settings)
