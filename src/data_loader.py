@@ -2,10 +2,10 @@ import os
 import pandas as pd
 from typing import Tuple
 from src.utils import RawOrderItemSchema, ProcessedDemandSchema
+from src.config import Settings
 
 
 RAW_DATA_DIR = os.path.join("data", "raw")
-PROCESSED_DATA_DIR = os.path.join("data", "processed")
 
 
 def load_raw_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -58,8 +58,8 @@ def validate_and_process_demand() -> pd.DataFrame:
     processed_df = pd.DataFrame(validated_records)
 
     # Save output dataset
-    os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
-    output_path = os.path.join(PROCESSED_DATA_DIR, "daily_demand.csv")
+    output_path = Settings.from_env().processed_data_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     processed_df.to_csv(output_path, index=False)
     print(f"Data successfully processed and saved to {output_path}")
 

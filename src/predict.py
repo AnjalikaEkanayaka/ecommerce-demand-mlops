@@ -4,17 +4,16 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 import joblib
 
-from src.drift_monitor import run_monitoring_pipeline, REPORT_DIR
+from src.drift_monitor import run_monitoring_pipeline
 from src.retrain import execute_retraining_pipeline
+from src.config import Settings
 
 app = FastAPI(title="E-Commerce Demand Forecasting API")
 
-MODEL_PATH = os.path.join("models", "demand_model.pkl")
-
-
 def load_model():
-    if os.path.exists(MODEL_PATH):
-        return joblib.load(MODEL_PATH)
+    model_path = Settings.from_env().model_path
+    if model_path.exists():
+        return joblib.load(model_path)
     return None
 
 
@@ -60,10 +59,9 @@ def predict_demand(payload: DemandPayload):
 @app.get("/drift-report", response_class=HTMLResponse)
 def get_drift_report():
     """Triggers drift monitoring check and serves the interactive HTML report."""
-    # Removed try/except so pytest can catch the actual Python error
     run_monitoring_pipeline()
     
-    report_file = os.path.join(REPORT_DIR, "drift_report.html")
+    report_file = Settings.from_env().report_dir / "drift_report.html"
     if not os.path.exists(report_file):
          raise HTTPException(status_code=404, detail="Drift report not found.")
             
@@ -74,7 +72,6 @@ def get_drift_report():
 @app.post("/retrain")
 def trigger_retrain(force: bool = False):
     """Triggers automated model retraining pipeline."""
-    # Removed try/except so pytest can catch the actual Python error
     success = execute_retraining_pipeline(drift_threshold_exceeded=force)
     
     if success:

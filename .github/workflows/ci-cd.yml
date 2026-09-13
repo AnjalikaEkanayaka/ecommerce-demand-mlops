@@ -22,11 +22,19 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements-dev.txt
+        pip check
 
     - name: Execute Automated Unit & Integration Tests
       run: |
-        pytest -v
+        python -m pytest -v --junitxml=test-results/pytest.xml
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: test-results/
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3

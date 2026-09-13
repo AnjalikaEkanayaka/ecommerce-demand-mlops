@@ -17,10 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 6. Copy application code, trained models, and dataset into the container
+# Runtime data and models are supplied separately, never by tests or the build.
 COPY src/ ./src/
-COPY models/ ./models/
-COPY data/ ./data/
 
 # 7. Expose port 8000 for the FastAPI web server
 EXPOSE 8000

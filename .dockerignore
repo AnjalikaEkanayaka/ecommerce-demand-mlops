@@ -1,0 +1,14 @@
+.git/
+.venv*/
+.uv-cache/
+__pycache__/
+.pytest_cache/
+data/
+models/
+runtime/
+reports/
+mlruns/
+mlartifacts/
+*.db*
+.env
+test-results/
