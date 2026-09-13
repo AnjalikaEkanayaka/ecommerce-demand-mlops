@@ -5,10 +5,7 @@ import mlflow.xgboost
 import pandas as pd
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-
-
-PROCESSED_DATA_PATH = os.path.join("data", "processed", "daily_demand.csv")
-MODEL_DIR = "models"
+from src.config import Settings, configure_tracking
 
 
 def create_time_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -29,12 +26,13 @@ def create_time_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def train_model() -> None:
+def train_model(settings: Settings | None = None) -> None:
     """Trains an XGBoost regressor with MLflow tracking and registration."""
-    if not os.path.exists(PROCESSED_DATA_PATH):
+    settings = settings or Settings.from_env()
+    if not settings.processed_data_path.exists():
         raise FileNotFoundError("Processed dataset missing. Run 'python -m src.data_loader' first.")
 
-    df = pd.read_csv(PROCESSED_DATA_PATH)
+    df = pd.read_csv(settings.processed_data_path)
     featured_df = create_time_features(df)
 
     features = ["avg_price", "day_of_week", "month", "day", "lag_1", "lag_7", "rolling_mean_7"]
@@ -48,13 +46,15 @@ def train_model() -> None:
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     # Set MLflow Experiment
-    mlflow.set_experiment("ecommerce-demand-forecasting")
+    configure_tracking(settings)
 
     params = {
         "n_estimators": 100,
         "learning_rate": 0.05,
         "max_depth": 5,
-        "random_state": 42
+        "random_state": 42,
+        "n_jobs": 1,
+        "tree_method": "hist"
     }
 
     with mlflow.start_run(run_name="xgboost_baseline") as run:
@@ -75,8 +75,8 @@ def train_model() -> None:
         mlflow.log_metric("rmse", rmse)
 
         # Save model locally
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        model_path = os.path.join(MODEL_DIR, "demand_model.pkl")
+        settings.model_path.parent.mkdir(parents=True, exist_ok=True)
+        model_path = settings.model_path
         joblib.dump(model, model_path)
 
         # Log and register model in MLflow Registry

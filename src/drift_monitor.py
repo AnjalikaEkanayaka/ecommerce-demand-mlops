@@ -1,18 +1,10 @@
 import os
 import pandas as pd
 from typing import Tuple
+from src.config import Settings
 
-# Modern vs Legacy Evidently import handling
-try:
-    from evidently.metric_preset import DataDriftPreset, TargetDriftPreset
-    from evidently.report import Report
-except ImportError:
-    from evidently.presets import DataDriftPreset, TargetDriftPreset
-    from evidently import Report
-
-
-PROCESSED_DATA_PATH = os.path.join("data", "processed", "daily_demand.csv")
-REPORT_DIR = os.path.join("reports")
+from evidently.metric_preset import DataDriftPreset, TargetDriftPreset
+from evidently.report import Report
 
 
 def generate_drift_report(
@@ -23,8 +15,9 @@ def generate_drift_report(
     Compares reference baseline data with current inference telemetry 
     using Evidently AI to evaluate data drift.
     """
-    os.makedirs(REPORT_DIR, exist_ok=True)
-    report_path = os.path.join(REPORT_DIR, "drift_report.html")
+    report_dir = Settings.from_env().report_dir
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = str(report_dir / "drift_report.html")
 
     # Initialize Evidently Report with Data Drift Presets
     report = Report(metrics=[
@@ -44,10 +37,11 @@ def generate_drift_report(
 
 def run_monitoring_pipeline() -> None:
     """Simulates production monitoring by comparing baseline data to drifted telemetry."""
-    if not os.path.exists(PROCESSED_DATA_PATH):
+    processed_path = Settings.from_env().processed_data_path
+    if not processed_path.exists():
         raise FileNotFoundError("Processed dataset missing. Run 'python -m src.data_loader' first.")
 
-    reference_df = pd.read_csv(PROCESSED_DATA_PATH)
+    reference_df = pd.read_csv(processed_path)
 
     # Simulate production telemetry drift (increase prices by 30% and units sold)
     current_df = reference_df.copy()
