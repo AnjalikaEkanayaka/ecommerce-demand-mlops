@@ -1,27 +1,23 @@
-# 1. Use an official, lightweight Python base image
 FROM python:3.12-slim
 
-# 2. Prevent Python from writing .pyc files and buffer outputs for real-time logging
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    APP_RUNTIME_DIR=/runtime \
+    MLFLOW_TRACKING_URI=sqlite:////runtime/mlflow.db \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
 
-# 3. Set the working directory inside the container
 WORKDIR /app
 
-# 4. Install system build dependencies required for compiling Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# XGBoost needs the OpenMP runtime; no compiler toolchain is retained.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# 5. Copy requirements file and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && pip check
 
-# Runtime data and models are supplied separately, never by tests or the build.
 COPY src/ ./src/
+RUN mkdir -p /runtime
 
-# 7. Expose port 8000 for the FastAPI web server
 EXPOSE 8000
-
-# 8. Command to launch the FastAPI app using Uvicorn when the container starts
-CMD ["uvicorn", "src.predict:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.predict:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

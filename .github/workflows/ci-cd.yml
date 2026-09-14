@@ -43,5 +43,42 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
+        load: true
         push: false
         tags: ecommerce-demand-api:latest
+
+    - name: Validate Compose configuration
+      run: docker compose --profile tracking config --quiet
+
+    - name: Check container startup without data or models
+      run: |
+        docker run -d --name demand-api-check -p 127.0.0.1:8000:8000 ecommerce-demand-api:latest
+        python - <<'PY'
+        import json
+        import time
+        import urllib.error
+        import urllib.request
+
+        for attempt in range(30):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                    assert json.load(response) == {"status": "healthy"}
+                break
+            except (OSError, urllib.error.URLError):
+                time.sleep(1)
+        else:
+            raise RuntimeError("Container did not become healthy")
+
+        try:
+            urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5)
+        except urllib.error.HTTPError as error:
+            assert error.code == 503
+        else:
+            raise AssertionError("An empty container must not report model readiness")
+        PY
+
+    - name: Container diagnostics and cleanup
+      if: always()
+      run: |
+        docker logs demand-api-check || true
+        docker rm -f demand-api-check || true
