@@ -1,5 +1,5 @@
 import logging
-import os
+import re
 import numpy as np
 import pandas as pd
 from xgboost.core import XGBoostError
@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.features import FEATURE_COLUMNS
 from src.model_store import ModelStore
 
-from src.drift_monitor import run_monitoring_pipeline
 from src.retrain import execute_retraining_pipeline
 from src.config import Settings
 
@@ -98,16 +97,16 @@ def predict_demand(payload: DemandPayload):
 
 
 @app.get("/drift-report", response_class=HTMLResponse)
-def get_drift_report():
-    """Triggers drift monitoring check and serves the interactive HTML report."""
-    run_monitoring_pipeline()
-    
-    report_file = Settings.from_env().report_dir / "drift_report.html"
-    if not os.path.exists(report_file):
-         raise HTTPException(status_code=404, detail="Drift report not found.")
-            
-    with open(report_file, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read(), status_code=200)
+def get_drift_report(source: str, run_id: str):
+    """Serve an existing report without running monitoring."""
+    if source not in {"observed", "simulated"} or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise HTTPException(status_code=422, detail="Invalid report selection.")
+    report_file = Settings.from_env().report_dir / source / run_id / "drift_report.html"
+    try:
+        content = report_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Drift report not found.") from None
+    return HTMLResponse(content=content)
 
 
 @app.post("/retrain")
