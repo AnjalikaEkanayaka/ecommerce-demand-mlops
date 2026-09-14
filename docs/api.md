@@ -34,8 +34,7 @@ request, so subsequent requests see promoted versions without restarting. This
 simple approach is intended for low request volume; there is no model cache or
 background polling. Prediction does not contact MLflow.
 
-The existing `/drift-report` route runs a simulated drift demonstration.
-It is not live production monitoring. `/retrain?force=true` requests the shared
-evaluation pipeline; it does not bypass promotion criteria. These synchronous
-administrative routes have no authentication and this demo should run locally;
-they will be reviewed in the monitoring phase.
+The /drift-report route serves an existing report selected by source and run_id.
+See [Batch monitoring](monitoring.md) for explicit monitoring commands.
+The /retrain?force=true route requests evaluation without bypassing promotion
+criteria. It is synchronous and unauthenticated; this demo is intended for local use.

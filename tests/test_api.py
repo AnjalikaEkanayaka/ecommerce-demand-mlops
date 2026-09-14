@@ -38,12 +38,23 @@ def test_invalid_request(model_artifact):
         assert client.post("/predict", json={**PAYLOAD, "month": 13}).status_code == 422
 
 
-def test_drift_endpoint(daily_data, settings):
+def test_drift_endpoint(settings):
+    run_id = "a" * 32
+    report = settings.report_dir / "simulated" / run_id / "drift_report.html"
+    report.parent.mkdir(parents=True)
+    report.write_text("<html>Simulated drift</html>", encoding="utf-8")
     with TestClient(app) as client:
-        response = client.get("/drift-report")
+        response = client.get(f"/drift-report?source=simulated&run_id={run_id}")
         assert response.status_code == 200
         assert "html" in response.headers["content-type"]
-        assert (settings.report_dir / "drift_report.html").is_file()
+        assert "Simulated drift" in response.text
+
+
+def test_missing_drift_report_does_not_generate_data(settings):
+    with TestClient(app) as client:
+        assert client.get("/drift-report", params={"source": "observed", "run_id": "b" * 32}).status_code == 404
+        assert client.get("/drift-report", params={"source": "../", "run_id": "bad"}).status_code == 422
+    assert not settings.report_dir.exists()
 
 def test_retrain_without_trigger_is_skipped(settings):
     with TestClient(app) as client:
