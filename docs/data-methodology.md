@@ -48,10 +48,15 @@ at one fixed date.
 The offline demonstration assumes daily counts are complete before the next
 forecast. The static dataset does not establish production data-arrival timing.
 
-Candidate comparison, safe promotion, and a separate final reporting holdout
-remain unfinished.
+Candidates must improve MAE by at least 1% against both the seasonal-naive
+baseline and any incumbent, without worsening RMSE. Comparisons use the same
+validation dates. Promotion requires a validation window after the incumbent's
+previous evaluation period. Rejected candidates do not replace production.
+
+For a separate final reporting period, follow [the holdout protocol](holdout.md).
+Its reserved dates are excluded from the development dataset used for selection.
 
 ## Compatibility
 
 Model input changed from seven features to six. Old price-based models cannot
-be reused. New training will be needed after promotion safeguards are finished.
+be reused. Native versioned models and compatible metadata are required.
