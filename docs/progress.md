@@ -5,31 +5,27 @@ MLflow candidate tracking; baseline/incumbent evaluation and guarded publication
 API readiness and error handling; explicit observed/simulated batch monitoring;
 optional Docker/Compose with CI container startup checks; final holdout tooling.
 
-The README and focused docs describe the current code. Historical temporary
-validation environments are not part of setup. Use the pinned requirements with
-one Python 3.12 environment; no committed SQLite database is needed.
+## Verified evidence
 
-## Evidence and limits
+[CI run for commit 74d40d1](https://github.com/AnjalikaEkanayaka/ecommerce-demand-mlops/actions/runs/34815998762)
+completed successfully: dependencies, full tests, Docker build, Compose validation
+and empty-container API startup. Later commits should be checked against their
+own workflow runs. The current result-documentation update still requires CI.
 
-The user confirmed passing GitHub Actions for the earlier merged phases through
-Docker cleanup. The holdout and final documentation changes still require their
-current PR checks. Consult the workflow run for the exact tested commit rather
-than treating this document as a permanent certification.
+A real-data CPU-only run and reporting-only holdout evaluation completed locally.
+The validation gate promoted the initial candidate. Holdout MAE improved over
+seasonal naive, while RMSE worsened. See [measured results](results.md) for dates,
+provenance and limitations. This is not evidence of consistent baseline superiority.
 
-Recent local checks are syntax and whitespace checks only. Full tests, builds
-and startup verification run in GitHub Actions to avoid unnecessary laptop load.
-No actual cloud deployment is configured. No real-data forecasting accuracy or
-unbiased holdout result has yet been recorded here.
+Runtime data, model artifacts and SQLite stores remain ignored by Git. No
+additional environments or heavyweight infrastructure are required. Tests of
+incumbent replacement, failure handling and drift-triggered orchestration use
+isolated fixtures; a live production deployment has not been performed.
 
-## Final demonstration checklist
+## Closing checks
 
-1. Confirm the final PR's full CI run is green.
-2. Choose a complete real-data period and reserve holdout dates before selection.
-3. Run one CPU-only training experiment when resources permit.
-4. Record the candidate decision and baseline comparison, including rejection.
-5. If production qualifies, evaluate the frozen model once on the holdout.
-6. Record actual MAE/RMSE, dates and model version; never substitute synthetic
-   test results for real-data evidence.
-
-Runtime data, reports and model artifacts remain ignored by Git. Keep small
-human-written result summaries only when backed by the recorded experiment.
+- Run CI on the results-documentation commit and merge after it passes.
+- Optional local API demonstration can use the selected experiment runtime;
+  use `/health`, `/ready` and `/docs` without starting Docker.
+- Do not tune against the reported holdout and continue calling it untouched.
+  Further model improvements need new unseen evaluation data.
