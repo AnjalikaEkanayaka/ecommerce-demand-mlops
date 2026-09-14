@@ -88,7 +88,15 @@ python -m src.train
 
 The result is `promoted`, `rejected` or `skipped`. No production model is created
 if the first candidate fails the baseline gate. Do not bypass the gate merely
-to obtain predictions. No measured real-data accuracy is claimed in this README.
+to obtain predictions.
+
+## Measured result
+
+On the reserved 18–31 July 2018 holdout, XGBoost achieved MAE **62.03** versus
+**67.50** for the seasonal baseline, but RMSE **118.80** versus **86.23**.
+That is 8.1% lower MAE and 37.8% higher RMSE: a mixed result, not consistent
+outperformance. The model passed the earlier validation gate; holdout reporting
+did not alter promotion. See [results, dates and limitations](docs/results.md).
 
 ## MLflow and model storage
 
@@ -177,6 +185,4 @@ explicit SQLite runtime volume with the API. See [Docker instructions](docs/dock
 - `runtime/`: ignored data, models, SQLite tracking, reports and holdout outputs.
 - `.github/workflows/`: CI verification.
 
-Remaining evidence to produce is a real-data run with a frozen evaluation
-protocol, actual error metrics and an honest baseline comparison. See
-[verification status](docs/progress.md).
+See [real-data results](docs/results.md) and [verification status](docs/progress.md).
