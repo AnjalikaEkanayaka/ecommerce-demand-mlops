@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from src.predict import app, load_model
 from src.features import FEATURE_COLUMNS
@@ -21,7 +22,10 @@ def test_missing_model(settings):
 def test_health_and_prediction(model_artifact):
     with TestClient(app) as client:
         response = client.get("/health")
-        assert response.json() == {"status": "healthy", "model_loaded": True}
+        assert response.json() == {"status": "healthy"}
+        ready = client.get("/ready")
+        assert ready.status_code == 200
+        assert ready.json() == {"status": "ready", "model_loaded": True}
         response = client.post("/predict", json=PAYLOAD)
         assert response.status_code == 200
         prediction = response.json()["predicted_units_sold"]
@@ -86,3 +90,70 @@ def test_prediction_without_model_returns_unavailable(settings):
         response = client.post("/predict", json=PAYLOAD)
 
     assert response.status_code == 503
+
+
+def test_health_does_not_load_model(monkeypatch):
+    def must_not_load():
+        pytest.fail("Liveness must not load a model")
+
+    monkeypatch.setattr("src.predict.load_model", must_not_load)
+    with TestClient(app) as client:
+        assert client.get("/health").json() == {"status": "healthy"}
+
+
+def test_missing_model_is_not_ready(settings):
+    with TestClient(app) as client:
+        assert client.get("/ready").status_code == 503
+
+
+@pytest.mark.parametrize("artifact", ["production.json", "metadata.json", "model.json"])
+def test_corrupt_model_is_unavailable(model_artifact, settings, artifact):
+    from src.model_store import ModelStore
+
+    store = ModelStore(settings.runtime_dir / "models")
+    directory = store.version_directory(store.production_version())
+    path = store.production_path if artifact == "production.json" else directory / artifact
+    path.write_text("invalid json", encoding="utf-8")
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 503
+        response = client.post("/predict", json=PAYLOAD)
+        assert response.status_code == 503
+        assert str(settings.runtime_dir) not in response.text
+
+
+@pytest.mark.parametrize(
+    "update",
+    [{"lag_1": -1}, {"month": "5"}, {"day": True}, {"lag_7": "NaN"}],
+)
+def test_invalid_inputs_are_rejected_before_loading(update, monkeypatch):
+    def must_not_load():
+        pytest.fail("Invalid input must be rejected before loading")
+
+    monkeypatch.setattr("src.predict.load_model", must_not_load)
+    with TestClient(app) as client:
+        assert client.post("/predict", json={**PAYLOAD, **update}).status_code == 422
+
+
+@pytest.mark.parametrize("predictions", [[float("nan")], [float("inf")], [-1], [], [1, 2]])
+def test_invalid_prediction_returns_unavailable(predictions, monkeypatch):
+    class InvalidModel:
+        def predict(self, features):
+            assert list(features.columns) == FEATURE_COLUMNS
+            return predictions
+
+    monkeypatch.setattr("src.predict.load_model", lambda: InvalidModel())
+    with TestClient(app) as client:
+        assert client.post("/predict", json=PAYLOAD).status_code == 503
+
+
+def test_prediction_failure_returns_unavailable(monkeypatch):
+    class BrokenModel:
+        def predict(self, features):
+            raise ValueError("internal model detail")
+
+    monkeypatch.setattr("src.predict.load_model", lambda: BrokenModel())
+    with TestClient(app) as client:
+        response = client.post("/predict", json=PAYLOAD)
+        assert response.status_code == 503
+        assert "internal model detail" not in response.text

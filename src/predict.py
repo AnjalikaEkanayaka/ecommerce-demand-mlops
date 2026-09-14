@@ -1,4 +1,8 @@
+import logging
 import os
+import numpy as np
+import pandas as pd
+from xgboost.core import XGBoostError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,11 +14,16 @@ from src.retrain import execute_retraining_pipeline
 from src.config import Settings
 
 app = FastAPI(title="E-Commerce Demand Forecasting API")
+logger = logging.getLogger(__name__)
 
 def load_model():
     settings = Settings.from_env()
     store = ModelStore(settings.runtime_dir / "models")
-    production = store.load_production()
+    try:
+        production = store.load_production()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, XGBoostError):
+        logger.exception("Production model could not be loaded")
+        return None
 
     if production is None:
         return None
@@ -27,6 +36,7 @@ class DemandPayload(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         allow_inf_nan=False,
+        strict=True,
     )
 
     day_of_week: int = Field(..., ge=0, le=6)
@@ -39,28 +49,51 @@ class DemandPayload(BaseModel):
 
 @app.get("/health")
 def health_check():
-    model = load_model()
-    return {"status": "healthy", "model_loaded": model is not None}
+    """Liveness does not read artifacts or contact MLflow."""
+    return {"status": "healthy"}
 
 
-@app.post("/predict")
-def predict_demand(payload: DemandPayload):
+@app.get("/ready")
+def readiness_check():
+    """Readiness requires a compatible production artifact."""
+    require_model()
+    return {"status": "ready", "model_loaded": True}
+
+
+def require_model():
     model = load_model()
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail="A compatible trained model is not available.",
+            detail="A compatible production model is not available.",
         )
+    return model
 
-    features = [[
-        getattr(payload, column)
-        for column in FEATURE_COLUMNS
-    ]]
 
-    prediction = model.predict(features)[0]
+@app.post("/predict")
+def predict_demand(payload: DemandPayload):
+    model = require_model()
+    features = pd.DataFrame(
+        [[getattr(payload, column) for column in FEATURE_COLUMNS]],
+        columns=FEATURE_COLUMNS,
+    )
+    try:
+        predictions = np.asarray(model.predict(features), dtype=float)
+        if (
+            predictions.shape != (1,)
+            or not np.isfinite(predictions).all()
+            or (predictions < 0).any()
+        ):
+            raise ValueError("Invalid demand prediction")
+    except (ValueError, TypeError, XGBoostError):
+        logger.exception("Production prediction failed")
+        raise HTTPException(
+            status_code=503,
+            detail="The production model could not produce a valid prediction.",
+        ) from None
     return {
         "status": "success",
-        "predicted_units_sold": float(prediction)
+        "predicted_units_sold": float(predictions[0])
     }
 
 
