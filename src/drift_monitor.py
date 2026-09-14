@@ -28,10 +28,12 @@ def describe_window(frame):
 
 
 def generate_drift_report(reference_df, current_df, *, output_dir):
-    from evidently.metric_preset import DataDriftPreset
+    from evidently.metrics import DatasetDriftMetric
     from evidently.report import Report
 
-    report = Report(metrics=[DataDriftPreset(
+    # A preset also includes DataDriftTable, which duplicates dataset_drift.
+    # Request only the aggregate metric consumed by this monitoring workflow.
+    report = Report(metrics=[DatasetDriftMetric(
         columns=[TARGET_COLUMN], stattest='ks', stattest_threshold=0.05,
     )])
     report.run(reference_data=reference_df[[TARGET_COLUMN]],
